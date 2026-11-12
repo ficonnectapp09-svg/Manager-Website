@@ -1,0 +1,32 @@
+name: Git Security & Secret Protection
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security-audit:
+    name: Git Secret & Push Protection Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Execute Full Repository Security Audit
+        run: |
+          node scripts/git-security-check.js
+
+      - name: Verify Outgoing Commits Policy
+        run: |
+          node scripts/git-security-check.js --pre-push
+

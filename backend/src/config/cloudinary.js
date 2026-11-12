@@ -18,29 +18,24 @@ candidateEnvPaths.forEach(p => {
   }
 });
 
-const DEFAULT_CLOUD_NAME = 'r6vovvet';
-const DEFAULT_API_KEY = '168714678711119';
-const DEFAULT_API_SECRET = 'jbKogCLVFjo-5fZwDdUt23h6OeI';
-const DEFAULT_CLOUDINARY_URL = 'cloudinary://168714678711119:jbKogCLVFjo-5fZwDdUt23h6OeI@r6vovvet';
+const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+const apiKey = process.env.CLOUDINARY_API_KEY;
+const apiSecret = process.env.CLOUDINARY_API_SECRET;
+const cloudinaryUrl = process.env.CLOUDINARY_URL;
 
-const cloudName = process.env.CLOUDINARY_CLOUD_NAME || DEFAULT_CLOUD_NAME;
-const apiKey = process.env.CLOUDINARY_API_KEY || DEFAULT_API_KEY;
-const apiSecret = process.env.CLOUDINARY_API_SECRET || DEFAULT_API_SECRET;
-const cloudinaryUrl = process.env.CLOUDINARY_URL || DEFAULT_CLOUDINARY_URL;
-
-if (cloudinaryUrl && !process.env.CLOUDINARY_URL) {
-  process.env.CLOUDINARY_URL = cloudinaryUrl;
+if (cloudinaryUrl) {
+  cloudinary.config(cloudinaryUrl);
+} else if (cloudName && apiKey && apiSecret) {
+  cloudinary.config({
+    cloud_name: cloudName,
+    api_key: apiKey,
+    api_secret: apiSecret,
+    secure: true
+  });
 }
 
-cloudinary.config({
-  cloud_name: cloudName,
-  api_key: apiKey,
-  api_secret: apiSecret,
-  secure: true
-});
-
 function isCloudinaryConfigured() {
-  return Boolean(cloudName && apiKey && apiSecret);
+  return Boolean(process.env.CLOUDINARY_URL || (cloudName && apiKey && apiSecret));
 }
 
 function extractPublicId(urlOrId) {
