@@ -236,6 +236,11 @@ const handleFileDelete = async (req, res) => {
       }
     }
 
+    if (rawTarget.includes('cloudinary.com') || rawTarget.includes('connect_manager')) {
+      const { deleteFromCloudinary } = require('../config/cloudinary');
+      await deleteFromCloudinary(rawTarget).catch(() => {});
+    }
+
     if (fs.existsSync(filePath)) {
       try {
         fs.unlinkSync(filePath);

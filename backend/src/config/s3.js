@@ -1,5 +1,6 @@
 const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { uploadToCloudinary, isCloudinaryConfigured } = require('./cloudinary');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -228,6 +229,15 @@ async function getObjectStream(key) {
 }
 
 async function uploadToS3(fileBufferOrPath, folder = 'manager_uploads', filenameHint = 'upload.jpg') {
+  if (isCloudinaryConfigured()) {
+    try {
+      const cRes = await uploadToCloudinary(fileBufferOrPath, folder, filenameHint);
+      return cRes;
+    } catch (cErr) {
+      console.warn('[Storage] Cloudinary upload attempted, falling back to S3:', cErr.message);
+    }
+  }
+
   try {
     let buffer;
     let hint = filenameHint;
@@ -329,7 +339,7 @@ async function uploadToS3(fileBufferOrPath, folder = 'manager_uploads', filename
 
 module.exports = {
   uploadToS3,
-  uploadToCloudinary: uploadToS3,
+  uploadToCloudinary,
   getPresignedUrl,
   getDurableImageUrl,
   resolveDurableImageUrl,
