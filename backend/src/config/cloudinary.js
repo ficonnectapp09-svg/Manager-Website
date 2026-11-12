@@ -202,3 +202,4 @@ module.exports = {
   isCloudinaryConfigured,
   extractPublicId
 };
+
