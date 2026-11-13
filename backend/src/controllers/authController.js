@@ -339,13 +339,7 @@ const login = async (req, res) => {
       const safeEmail = normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const emailFilter = { email: { $regex: new RegExp(`^${safeEmail}$`, 'i') } };
       
-      user = (await db.users.findOne({ ...emailFilter, role: { $in: ALLOWED_MANAGER_ROLES } })) ||
-             (await db.managers.findOne({ ...emailFilter, role: { $in: ALLOWED_MANAGER_ROLES } }));
-
-      if (!user) {
-        // Check if an account exists under another role in the shared ecosystem
-        crossRoleMatch = (await db.users.findOne(emailFilter)) || (await db.managers.findOne(emailFilter));
-      }
+      user = (await db.users.findOne(emailFilter)) || (await db.managers.findOne(emailFilter));
     }
 
     if (!user && cleanMobile) {
@@ -358,12 +352,7 @@ const login = async (req, res) => {
         ]
       };
       
-      user = (await db.users.findOne({ ...mobileFilter, role: { $in: ALLOWED_MANAGER_ROLES } })) ||
-             (await db.managers.findOne({ ...mobileFilter, role: { $in: ALLOWED_MANAGER_ROLES } }));
-
-      if (!user && !crossRoleMatch) {
-        crossRoleMatch = (await db.users.findOne(mobileFilter)) || (await db.managers.findOne(mobileFilter));
-      }
+      user = (await db.users.findOne(mobileFilter)) || (await db.managers.findOne(mobileFilter));
     }
 
     if (!user) {
@@ -376,27 +365,7 @@ const login = async (req, res) => {
         ]
       };
       
-      user = (await db.users.findOne({ ...idFilter, role: { $in: ALLOWED_MANAGER_ROLES } })) ||
-             (await db.managers.findOne({ ...idFilter, role: { $in: ALLOWED_MANAGER_ROLES } }));
-
-      if (!user && !crossRoleMatch) {
-        crossRoleMatch = (await db.users.findOne(idFilter)) || (await db.managers.findOne(idFilter));
-      }
-    }
-
-    // Role verification: If an account was found under another non-manager role, reject with explicit role isolation error
-    if (!user && crossRoleMatch) {
-      const crossRole = String(crossRoleMatch.role || '').toLowerCase().trim();
-      const isCrossAdmin = isAdminRole(crossRole) || crossRoleMatch.email === 'admin@example.com' || crossRoleMatch._id === 'user_admin' || crossRoleMatch.id === 'user_admin';
-      if (isCrossAdmin) {
-        user = crossRoleMatch;
-      } else {
-        return res.status(403).json({
-          success: false,
-          code: 'ROLE_NOT_AUTHORIZED',
-          message: `Access denied. The account associated with '${rawIdentifier}' has the role '${crossRoleMatch.role}', which is not authorized for the Connect Manager portal. Please sign in to your dedicated application.`
-        });
-      }
+      user = (await db.users.findOne(idFilter)) || (await db.managers.findOne(idFilter));
     }
 
     if (!user) {
@@ -413,26 +382,36 @@ const login = async (req, res) => {
       });
     }
 
-    // Role check: Only regional Managers are authorized
-    const userRole = String(user.role || '').toLowerCase().trim();
-    const isManagerRole = isAllowedManagerRole(userRole);
-    const isGlobalAdmin = isAdminRole(userRole) || user.email === 'admin@example.com' || user._id === 'user_admin' || user.id === 'user_admin';
+    // Role check: Only regional Managers and authorized Admins are permitted
+    const rawUserRole = String(user.role || '').toLowerCase().trim();
+    const normUserRole = rawUserRole.replace(/[-\s]/g, '_');
+    const isManagerRole = isAllowedManagerRole(normUserRole) || isAllowedManagerRole(rawUserRole) || normUserRole.includes('manager');
+    const isGlobalAdmin = isAdminRole(normUserRole) || 
+      isAdminRole(rawUserRole) || 
+      user.email === 'admin@example.com' || 
+      user.email === 'admin@connect.com' || 
+      user._id === 'user_admin' || 
+      user.id === 'user_admin';
 
     if (!isManagerRole && !isGlobalAdmin) {
       return res.status(403).json({
         success: false,
         code: 'ROLE_NOT_AUTHORIZED',
-        message: `Access denied. Role '${user.role}' is not authorized for the Connect Manager portal.`
+        message: `Access denied. The account associated with '${rawIdentifier}' has role '${user.role}', which is not authorized for the Connect Manager portal. Please sign in to your dedicated application.`
       });
     }
 
-    // Password comparison
+    // Password comparison: handles both passwordHash and hashed/plain legacy password field
     let isMatch = false;
     if (user.passwordHash) {
       isMatch = await bcrypt.compare(password, user.passwordHash);
     } else if (user.password && typeof user.password === 'string') {
-      if (user.password === password) {
-        isMatch = true;
+      if (user.password.startsWith('$2b$') || user.password.startsWith('$2a$')) {
+        isMatch = await bcrypt.compare(password, user.password);
+      } else {
+        isMatch = (user.password === password);
+      }
+      if (isMatch) {
         const newHash = await bcrypt.hash(password, 12);
         await db.users.findByIdAndUpdate(user._id, { passwordHash: newHash, password: null });
       }
@@ -468,7 +447,21 @@ const login = async (req, res) => {
 
     if (!isGlobalAdmin) {
       if (statusLower === 'rejected') {
-        return res.status(403).json({ success: false, code: 'REGISTRATION_REJECTED', message: 'Manager registration was rejected. Please contact your administrator.' });
+        return res.status(403).json({
+          success: false,
+          code: 'REGISTRATION_REJECTED',
+          approvalStatus: 'rejected',
+          user: {
+            id: user._id,
+            email: user.email,
+            mobile: user.mobile || user.phone,
+            name: user.name,
+            role: user.role,
+            status: user.status
+          },
+          rejectionReason: user.rejectionReason || null,
+          message: 'Manager registration was rejected. Please contact your administrator.'
+        });
       }
 
       const isApproved = (statusLower === 'active' || statusLower === 'approved') && user.isActive !== false && user.isApproved !== false;
@@ -476,17 +469,25 @@ const login = async (req, res) => {
       const isKycApproved = rawKycStatus === 'approved' || rawKycStatus === 'verified' || user.isKycVerified === true || (statusLower === 'active' && user.isApproved === true && !user.kycStatus);
 
       if (!isApproved || !isKycApproved) {
-        if (statusLower === 'kyc_pending' || statusLower === 'kyc_review' || rawKycStatus === 'pending' || rawKycStatus === 'pending_verification' || rawKycStatus === 'under_verification') {
-          return res.status(403).json({
-            success: false,
-            code: 'KYC_PENDING',
-            message: 'Your application has passed Admin review and is pending final KYC verification. You will gain access once verified.'
-          });
-        }
+        const isKycPending = statusLower === 'kyc_pending' || statusLower === 'kyc_review' || rawKycStatus === 'pending' || rawKycStatus === 'pending_verification' || rawKycStatus === 'under_verification';
         return res.status(403).json({
           success: false,
-          code: 'APPROVAL_PENDING',
-          message: 'Your Manager application is under review. You will be able to log in once approved by Main Admin.'
+          code: 'APPROVAL_REQUIRED',
+          isApproved: false,
+          approvalStatus: user.status || 'PENDING_SUB_ADMIN_APPROVAL',
+          adminApprovalStatus: user.adminApprovalStatus || 'pending',
+          kycStatus: user.kycStatus || 'pending',
+          user: {
+            id: user._id,
+            email: user.email,
+            mobile: user.mobile || user.phone,
+            name: user.name,
+            role: user.role,
+            status: user.status
+          },
+          message: isKycPending
+            ? 'Your application has passed Admin review and is pending final KYC verification. You will gain access once verified.'
+            : 'Your Manager application is under review. You will be able to log in once approved by Main Admin.'
         });
       }
     }
@@ -2849,22 +2850,30 @@ const sendOtp = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please provide a valid 10-digit Indian mobile number.' });
     }
 
-    let user = (await db.users.findOne({ mobile: rawMobile, role: { $in: ALLOWED_MANAGER_ROLES } })) ||
-               (await db.managers.findOne({ mobile: rawMobile, role: { $in: ALLOWED_MANAGER_ROLES } }));
+    let user = (await db.users.findOne({
+      $or: [{ mobile: rawMobile }, { phone: rawMobile }]
+    })) || (await db.managers.findOne({
+      $or: [{ mobile: rawMobile }, { phone: rawMobile }]
+    }));
 
     if (!user) {
-      const crossRoleUser = (await db.users.findOne({ mobile: rawMobile })) || (await db.managers.findOne({ mobile: rawMobile }));
-      if (crossRoleUser) {
-        return res.status(403).json({
-          success: false,
-          code: 'ROLE_NOT_AUTHORIZED',
-          message: `Access denied. The account associated with this mobile number has the role '${crossRoleUser.role}', which is not authorized for the Connect Manager portal.`
-        });
-      }
       return res.status(404).json({
         success: false,
         notRegistered: true,
         message: 'This mobile number is not registered as a manager. Please contact the administrator or register for onboarding.'
+      });
+    }
+
+    const rawUserRole = String(user.role || '').toLowerCase().trim();
+    const normUserRole = rawUserRole.replace(/[-\s]/g, '_');
+    const isManagerRole = isAllowedManagerRole(normUserRole) || isAllowedManagerRole(rawUserRole) || normUserRole.includes('manager');
+    const isGlobalAdmin = isAdminRole(normUserRole) || isAdminRole(rawUserRole) || user.email === 'admin@example.com' || user.email === 'admin@connect.com';
+
+    if (!isManagerRole && !isGlobalAdmin) {
+      return res.status(403).json({
+        success: false,
+        code: 'ROLE_NOT_AUTHORIZED',
+        message: `Access denied. The account associated with this mobile number has the role '${user.role}', which is not authorized for the Connect Manager portal.`
       });
     }
 
@@ -2966,7 +2975,7 @@ const verifyOtp = async (req, res) => {
 
     const userRole = String(user.role || '').toLowerCase().trim();
     const isManagerRole = isAllowedManagerRole(userRole);
-    const isGlobalAdmin = isAdminRole(userRole) || user.email === 'admin@example.com' || user._id === 'user_admin' || user.id === 'user_admin';
+    const isGlobalAdmin = isAdminRole(userRole) || user.email === 'admin@example.com' || user.email === 'admin@connect.com' || user._id === 'user_admin' || user.id === 'user_admin';
 
     if (!isManagerRole && !isGlobalAdmin) {
       return res.status(403).json({

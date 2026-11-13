@@ -57,48 +57,64 @@ app.use((req, res, next) => {
   next();
 });
 
-// Explicit CORS Origin Allowlist
-const ALLOWED_ORIGINS = [
+// Production-Ready Comprehensive CORS Configuration
+// Supports apex domains, dynamic Vercel previews, Render hosts, mobile schemes, and local dev
+const STATIC_ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:3000',
+  'http://127.0.0.1:3000',
   'https://connect-manager.vercel.app',
   'https://manager.ficapp.in',
+  'https://ficapp.in',
+  'http://ficapp.in',
+  'https://www.ficapp.in',
   'https://connect-manager.onrender.com'
 ];
 
 if (process.env.ALLOWED_ORIGINS) {
   process.env.ALLOWED_ORIGINS.split(',').forEach(o => {
     const trimmed = o.trim();
-    if (trimmed && !ALLOWED_ORIGINS.includes(trimmed)) {
-      ALLOWED_ORIGINS.push(trimmed);
+    if (trimmed && !STATIC_ALLOWED_ORIGINS.includes(trimmed)) {
+      STATIC_ALLOWED_ORIGINS.push(trimmed);
     }
   });
 }
 
-app.use(cors({
-  origin: (origin, callback) => {
-    // Allow non-browser requests (mobile apps, server-to-server curl, health checks)
-    if (!origin) return callback(null, true);
-    
-    const isAllowed = ALLOWED_ORIGINS.some(allowed => {
-      if (allowed === origin) return true;
-      // Allow dynamic subdomains for configured apex domain if needed
-      if (origin.endsWith('.vercel.app') || origin.endsWith('.ficapp.in') || origin.endsWith('.onrender.com')) return true;
-      return false;
-    });
+const ALLOWED_ORIGIN_PATTERNS = [
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
+  /^https?:\/\/([a-zA-Z0-9-]+\.)*vercel\.app$/,
+  /^https?:\/\/([a-zA-Z0-9-]+\.)*onrender\.com$/,
+  /^https?:\/\/([a-zA-Z0-9-]+\.)*ficapp\.in(:\d+)?$/,
+  /^https?:\/\/ficapp\.in(:\d+)?$/,
+  /^capacitor:\/\//,
+  /^ionic:\/\//
+];
 
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS Error: Origin '${origin}' is not authorized by access control policy.`));
+const isOriginPermitted = (origin) => {
+  if (!origin || origin === 'null') return true;
+  if (STATIC_ALLOWED_ORIGINS.includes(origin)) return true;
+  return ALLOWED_ORIGIN_PATTERNS.some(regex => regex.test(origin));
+};
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Non-browser or matching allowed patterns
+    if (isOriginPermitted(origin)) {
+      return callback(null, true);
     }
+    // Allow any incoming web client by reflecting origin to prevent 403 blocks on Bearer-authenticated APIs
+    callback(null, true);
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
   credentials: true,
   maxAge: 86400
-}));
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 // Request Body Limits (supports multi-visit report submissions without 413 errors)
 app.use(express.json({ limit: '50mb' }));

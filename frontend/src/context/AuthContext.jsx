@@ -335,17 +335,22 @@ export const AuthProvider = ({ children }) => {
       }
       throw new Error(res.message || 'Login failed. Invalid response from server.');
     } catch (err) {
-      if (err.data && (err.data.code === 'APPROVAL_REQUIRED' || err.data.code === 'REGISTRATION_REJECTED')) {
+      if (err.data && (
+        err.data.code === 'APPROVAL_REQUIRED' ||
+        err.data.code === 'APPROVAL_PENDING' ||
+        err.data.code === 'KYC_PENDING' ||
+        err.data.code === 'REGISTRATION_REJECTED'
+      )) {
         logout();
-        const pending = normalizeUser(err.data.user);
+        const pending = err.data.user ? normalizeUser(err.data.user) : null;
         if (pending && isAuthorizedRole(pending.role)) setPendingUser(pending);
         return {
           success: false,
           isApproved: false,
-          isPendingApproval: err.data.code === 'APPROVAL_REQUIRED',
+          isPendingApproval: err.data.code !== 'REGISTRATION_REJECTED',
           isRejected: err.data.code === 'REGISTRATION_REJECTED',
           code: err.data.code,
-          approvalStatus: err.data.approvalStatus,
+          approvalStatus: err.data.approvalStatus || err.data.code,
           adminApprovalStatus: err.data.adminApprovalStatus,
           kycStatus: err.data.kycStatus,
           rejectionReason: err.data.rejectionReason,
@@ -398,17 +403,22 @@ export const AuthProvider = ({ children }) => {
       }
       throw new Error(res.message || 'OTP verification failed.');
     } catch (err) {
-      if (err.data && (err.data.code === 'APPROVAL_REQUIRED' || err.data.code === 'REGISTRATION_REJECTED')) {
+      if (err.data && (
+        err.data.code === 'APPROVAL_REQUIRED' ||
+        err.data.code === 'APPROVAL_PENDING' ||
+        err.data.code === 'KYC_PENDING' ||
+        err.data.code === 'REGISTRATION_REJECTED'
+      )) {
         logout();
-        const pending = normalizeUser(err.data.user);
+        const pending = err.data.user ? normalizeUser(err.data.user) : null;
         if (pending && isAuthorizedRole(pending.role)) setPendingUser(pending);
         return {
           success: false,
           isApproved: false,
-          isPendingApproval: err.data.code === 'APPROVAL_REQUIRED',
+          isPendingApproval: err.data.code !== 'REGISTRATION_REJECTED',
           isRejected: err.data.code === 'REGISTRATION_REJECTED',
           code: err.data.code,
-          approvalStatus: err.data.approvalStatus,
+          approvalStatus: err.data.approvalStatus || err.data.code,
           adminApprovalStatus: err.data.adminApprovalStatus,
           kycStatus: err.data.kycStatus,
           rejectionReason: err.data.rejectionReason,
