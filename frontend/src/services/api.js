@@ -142,6 +142,14 @@ export const authService = {
     return handleResponse(res);
   },
 
+  async verifyPincode(pincode, state = '', district = '') {
+    const params = new URLSearchParams({ pincode: String(pincode).trim() });
+    if (state) params.append('state', String(state).trim());
+    if (district) params.append('district', String(district).trim());
+    const res = await fetch(`${API_BASE}/locations/verify-pincode?${params.toString()}`);
+    return handleResponse(res);
+  },
+
   async subAdminApproval(userId, action = 'approve', rejectionReason = '') {
     const res = await fetch(`${API_BASE}/auth/subadmin-approval`, {
       method: 'POST',
@@ -1007,6 +1015,10 @@ export const locationService = {
   async getPincodes(divisionId) {
     const query = divisionId ? `?divisionId=${divisionId}` : '';
     return fetchCachedLocation(`${API_BASE}/pincodes${query}`);
+  },
+
+  async verifyPincode(pincode, state = '', district = '') {
+    return authService.verifyPincode(pincode, state, district);
   }
 };
 

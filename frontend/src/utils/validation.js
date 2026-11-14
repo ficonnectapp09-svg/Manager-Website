@@ -389,3 +389,17 @@ export function validateLocationName(val, isRequired = true, fieldLabel = 'Locat
   }
   return null;
 }
+
+// ==============================================================================
+// 11. INDIAN POSTAL PIN CODE VALIDATION (6 DIGITS)
+// ==============================================================================
+export function validatePincode(val, isRequired = true) {
+  if (!val || (typeof val === 'string' && !val.trim())) {
+    return isRequired ? 'PIN Code is required.' : null;
+  }
+  const clean = String(val).replace(/\D/g, '');
+  if (!/^[1-9][0-9]{5}$/.test(clean)) {
+    return 'Enter a valid 6-digit Indian PIN Code.';
+  }
+  return null;
+}

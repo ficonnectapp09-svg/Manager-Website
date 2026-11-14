@@ -17,6 +17,7 @@ router.get('/states', optionalAuth, locationController.getStates);
 router.get('/districts', optionalAuth, locationController.getDistricts);
 router.get('/divisions', optionalAuth, locationController.getDivisions);
 router.get('/pincodes', optionalAuth, locationController.getPincodes);
+router.get('/verify-pincode', locationController.verifyPincode);
 
 // Location-write endpoints are strictly forbidden for managers
 router.post('/states', authMiddleware, blockManagersFromAdminEndpoints);

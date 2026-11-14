@@ -33,6 +33,7 @@ const {
   validateDob,
   validateLocationName
 } = require('../utils/validation');
+const { verifyIndianPostalPincode } = require('../utils/postalVerification');
 
 const ROLE_LIMITS = {
   state_manager: 8,      // 8 managers per State
@@ -796,13 +797,27 @@ const register = async (req, res) => {
       if (stateErr) return res.status(400).json({ success: false, message: stateErr });
     }
 
-    // Validate 6-digit Indian PIN Code starting with 1-9 if present
+    // Mandatory Authoritative Indian Postal PIN Code Verification
     if (addressObj.pincode) {
-      const cleanPin = addressObj.pincode.replace(/\D/g, '');
-      if (!/^[1-9][0-9]{5}$/.test(cleanPin)) {
-        return res.status(400).json({ success: false, message: 'PIN Code must be exactly 6 numeric digits starting with 1–9.' });
+      const cleanPin = String(addressObj.pincode).trim().replace(/\D/g, '');
+      const pinVerification = await verifyIndianPostalPincode(cleanPin, addressObj.state, addressObj.district);
+      if (!pinVerification.isValid) {
+        return res.status(400).json({
+          success: false,
+          code: pinVerification.code,
+          message: pinVerification.message
+        });
       }
       addressObj.pincode = cleanPin;
+      // Auto-enrich post office if post office was empty
+      if (!addressObj.postOffice && pinVerification.primaryPostOffice) {
+        addressObj.postOffice = pinVerification.primaryPostOffice;
+      }
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'PIN Code is required. Please enter a valid 6-digit Indian PIN Code.'
+      });
     }
 
     // Generate formattedAddressStr if not already set

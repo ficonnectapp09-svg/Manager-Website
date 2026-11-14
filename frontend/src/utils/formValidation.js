@@ -553,7 +553,7 @@ export const validatePincode = (val, isRequired = true) => {
   }
   const clean = String(val).replace(/\D/g, '');
   if (!/^[1-9][0-9]{5}$/.test(clean)) {
-    return { isValid: false, message: 'Enter a valid 6-digit Indian PIN code.', sanitizedValue: clean };
+    return { isValid: false, message: 'Enter a valid 6-digit Indian PIN Code.', sanitizedValue: clean };
   }
   return { isValid: true, message: '', sanitizedValue: clean };
 };

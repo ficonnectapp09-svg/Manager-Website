@@ -175,9 +175,45 @@ const getPincodes = async (req, res) => {
   }
 };
 
+const { verifyIndianPostalPincode } = require('../utils/postalVerification');
+
+// GET /api/locations/verify-pincode - Real-time official India Post postal directory verification
+const verifyPincode = async (req, res) => {
+  try {
+    const rawPin = req.query.pincode || req.query.pin || req.body?.pincode;
+    const state = req.query.state || req.body?.state || '';
+    const district = req.query.district || req.body?.district || '';
+
+    if (!rawPin) {
+      return res.status(400).json({
+        success: false,
+        isValid: false,
+        code: 'PINCODE_REQUIRED',
+        message: 'PIN Code is required for postal directory verification.'
+      });
+    }
+
+    const verificationResult = await verifyIndianPostalPincode(rawPin, state, district);
+
+    return res.json({
+      success: true,
+      ...verificationResult
+    });
+  } catch (err) {
+    console.error('PIN code verification error:', err);
+    return res.status(500).json({
+      success: false,
+      isValid: false,
+      code: 'VERIFICATION_ERROR',
+      message: 'Unable to verify PIN Code right now. Please try again.'
+    });
+  }
+};
+
 module.exports = {
   getStates,
   getDistricts,
   getDivisions,
-  getPincodes
+  getPincodes,
+  verifyPincode
 };

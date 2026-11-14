@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
+const locationController = require('../controllers/locationController');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const { checkRole, requireApprovalPermission } = require('../middleware/roleMiddleware');
 const { upload, documentUpload, logoUpload, avatarUploadFields, documentUploadFields } = require('../middleware/uploadMiddleware');
@@ -15,6 +16,7 @@ router.post('/register', authLimiter, authController.register);
 router.get('/locations', authController.getRegistrationLocations);
 router.get('/check-capacity', authController.checkCapacity);
 router.get('/registration-status/:userId', authController.getRegistrationStatus);
+router.get('/verify-pincode', locationController.verifyPincode);
 
 // Registration KYC and Avatar upload during registration (independent rate limited buckets)
 router.post('/upload-avatar', avatarUploadLimiter, avatarUploadFields, authController.uploadAvatar);

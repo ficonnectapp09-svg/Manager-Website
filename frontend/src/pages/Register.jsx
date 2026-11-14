@@ -58,7 +58,8 @@ import {
   validateIfsc,
   validateDob,
   getEighteenYearsAgoDateString,
-  validateLocationName
+  validateLocationName,
+  validatePincode
 } from '../utils/validation';
 
 const ROLES = [
@@ -160,6 +161,118 @@ export default function Register({
       [field]: value
     }));
   };
+
+  // Live Official India Post Postal Directory Verification State
+  const [pinVerification, setPinVerification] = useState({
+    verifying: false,
+    verified: false,
+    error: '',
+    postOffices: [],
+    primaryPostOffice: '',
+    verifiedDistrict: '',
+    verifiedState: ''
+  });
+
+  const verifyPincodeDebounced = useCallback(async (pinVal, stateVal, distVal) => {
+    const cleanPin = (pinVal || '').replace(/\D/g, '');
+    if (cleanPin.length !== 6) {
+      setPinVerification({
+        verifying: false,
+        verified: false,
+        error: cleanPin.length > 0 && cleanPin.startsWith('0') ? 'Enter a valid 6-digit Indian PIN Code.' : '',
+        postOffices: [],
+        primaryPostOffice: '',
+        verifiedDistrict: '',
+        verifiedState: ''
+      });
+      return;
+    }
+
+    if (!/^[1-9][0-9]{5}$/.test(cleanPin)) {
+      setPinVerification(prev => ({
+        ...prev,
+        verifying: false,
+        verified: false,
+        error: 'Enter a valid 6-digit Indian PIN Code.'
+      }));
+      setFieldErrors(prev => ({ ...prev, pincode: 'Enter a valid 6-digit Indian PIN Code.' }));
+      return;
+    }
+
+    setPinVerification(prev => ({ ...prev, verifying: true, error: '' }));
+
+    try {
+      const res = await authService.verifyPincode(cleanPin, stateVal, distVal);
+      if (res && res.isValid) {
+        setPinVerification({
+          verifying: false,
+          verified: true,
+          error: '',
+          postOffices: res.postOffices || [],
+          primaryPostOffice: res.primaryPostOffice || '',
+          verifiedDistrict: res.district || '',
+          verifiedState: res.state || ''
+        });
+        setFieldErrors(prev => ({ ...prev, pincode: '' }));
+
+        // Auto-fill state if empty
+        if (!stateVal && res.state) {
+          handleAddressChange('state', res.state);
+        }
+        // Auto-fill district if empty
+        if (!distVal && res.district) {
+          handleAddressChange('district', res.district);
+        }
+        // Auto-fill post office if empty
+        if (!addressFields.postOffice && res.primaryPostOffice) {
+          handleAddressChange('postOffice', res.primaryPostOffice);
+        }
+      } else {
+        const errorMsg = res?.message || 'This PIN Code does not exist in the verified postal directory.';
+        setPinVerification(prev => ({
+          ...prev,
+          verifying: false,
+          verified: false,
+          error: errorMsg,
+          postOffices: res?.postOffices || []
+        }));
+        setFieldErrors(prev => ({ ...prev, pincode: errorMsg }));
+      }
+    } catch (err) {
+      setPinVerification(prev => ({
+        ...prev,
+        verifying: false,
+        verified: false,
+        error: 'Unable to verify PIN Code right now. Please try again.'
+      }));
+      setFieldErrors(prev => ({ ...prev, pincode: 'Unable to verify PIN Code right now. Please try again.' }));
+    }
+  }, [addressFields.postOffice]);
+
+  useEffect(() => {
+    const cleanPin = (addressFields.pincode || '').replace(/\D/g, '');
+    if (cleanPin.length === 6) {
+      const timer = setTimeout(() => {
+        verifyPincodeDebounced(cleanPin, addressFields.state, addressFields.district);
+      }, 350);
+      return () => clearTimeout(timer);
+    } else {
+      setPinVerification(prev => {
+        if (prev.verified || prev.error) {
+          return {
+            verifying: false,
+            verified: false,
+            error: '',
+            postOffices: [],
+            primaryPostOffice: '',
+            verifiedDistrict: '',
+            verifiedState: ''
+          };
+        }
+        return prev;
+      });
+    }
+  }, [addressFields.pincode, addressFields.state, addressFields.district, verifyPincodeDebounced]);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -638,8 +751,12 @@ export default function Register({
       if (stErr) errors.state = stErr;
 
       const cleanPin = (addressFields.pincode || '').trim().replace(/\D/g, '');
-      if (!/^[1-9][0-9]{5}$/.test(cleanPin)) {
-        errors.pincode = 'Please enter a valid 6-digit Indian PIN Code starting with 1–9.';
+      if (!cleanPin) {
+        errors.pincode = 'PIN Code is required.';
+      } else if (!/^[1-9][0-9]{5}$/.test(cleanPin)) {
+        errors.pincode = 'Enter a valid 6-digit Indian PIN Code.';
+      } else if (!pinVerification.verified) {
+        errors.pincode = pinVerification.error || 'Please enter a verified 6-digit Indian PIN Code matching your state and district.';
       }
 
       const pwdErr = validatePassword(password, true);
@@ -720,8 +837,46 @@ export default function Register({
     return Object.keys(errors).length === 0;
   };
 
-  const handleNextStep = (step) => {
+  const handleNextStep = async (step) => {
     setError('');
+
+    if (step === 2) {
+      const cleanPin = (addressFields.pincode || '').trim().replace(/\D/g, '');
+      if (/^[1-9][0-9]{5}$/.test(cleanPin) && !pinVerification.verified) {
+        setPinVerification(prev => ({ ...prev, verifying: true }));
+        try {
+          const res = await authService.verifyPincode(cleanPin, addressFields.state, addressFields.district);
+          if (res && res.isValid) {
+            setPinVerification({
+              verifying: false,
+              verified: true,
+              error: '',
+              postOffices: res.postOffices || [],
+              primaryPostOffice: res.primaryPostOffice || '',
+              verifiedDistrict: res.district || '',
+              verifiedState: res.state || ''
+            });
+            if (fieldErrors.pincode) setFieldErrors(prev => ({ ...prev, pincode: '' }));
+          } else {
+            const errorMsg = res?.message || 'This PIN Code does not exist in the verified postal directory.';
+            setPinVerification(prev => ({
+              ...prev,
+              verifying: false,
+              verified: false,
+              error: errorMsg,
+              postOffices: res?.postOffices || []
+            }));
+            setFieldErrors(prev => ({ ...prev, pincode: errorMsg }));
+            setError(errorMsg);
+            return;
+          }
+        } catch (e) {
+          setError('Unable to verify PIN Code right now. Please try again.');
+          return;
+        }
+      }
+    }
+
     const isValid = validateStep(step);
     if (!isValid) {
       setError('Please fix the errors highlighted below before proceeding.');
@@ -1818,9 +1973,21 @@ export default function Register({
                       </div>
 
                       <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label" style={{ fontSize: '0.74rem', marginBottom: '3px', color: '#475569' }}>
-                          7. PIN Code (6 Digits) *
-                        </label>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                          <label className="form-label" style={{ fontSize: '0.74rem', margin: 0, color: '#475569' }}>
+                            7. PIN Code (6 Digits) *
+                          </label>
+                          {pinVerification.verifying && (
+                            <span style={{ fontSize: '0.7rem', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <RefreshCw size={11} className="animate-spin" /> Verifying...
+                            </span>
+                          )}
+                          {!pinVerification.verifying && pinVerification.verified && (
+                            <span style={{ fontSize: '0.7rem', color: '#16a34a', display: 'flex', alignItems: 'center', gap: '3px', fontWeight: 600 }}>
+                              <CheckCircle2 size={12} /> Verified India Post
+                            </span>
+                          )}
+                        </div>
                         <input
                           type="text"
                           required
@@ -1829,7 +1996,7 @@ export default function Register({
                           style={{
                             height: '36px',
                             fontSize: '0.82rem',
-                            border: fieldErrors.pincode ? '1.5px solid #ef4444' : undefined
+                            border: fieldErrors.pincode ? '1.5px solid #ef4444' : pinVerification.verified ? '1.5px solid #16a34a' : undefined
                           }}
                           placeholder="e.g. 636401"
                           value={addressFields.pincode}
@@ -1840,15 +2007,54 @@ export default function Register({
                           }}
                           onBlur={() => {
                             const clean = (addressFields.pincode || '').replace(/\D/g, '');
-                            if (!/^[1-9][0-9]{5}$/.test(clean)) {
-                              setFieldErrors(prev => ({ ...prev, pincode: 'Please enter a valid 6-digit Indian PIN Code starting with 1–9.' }));
+                            if (!clean) {
+                              setFieldErrors(prev => ({ ...prev, pincode: 'PIN Code is required.' }));
+                            } else if (!/^[1-9][0-9]{5}$/.test(clean)) {
+                              setFieldErrors(prev => ({ ...prev, pincode: 'Enter a valid 6-digit Indian PIN Code.' }));
+                            } else if (!pinVerification.verified && pinVerification.error) {
+                              setFieldErrors(prev => ({ ...prev, pincode: pinVerification.error }));
                             }
                           }}
                         />
                         {fieldErrors.pincode && (
-                          <p style={{ margin: '3px 0 0', fontSize: '0.72rem', color: '#ef4444', fontWeight: 600 }}>
-                            {fieldErrors.pincode}
+                          <p style={{ margin: '3px 0 0', fontSize: '0.72rem', color: '#ef4444', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <AlertCircle size={12} /> {fieldErrors.pincode}
                           </p>
+                        )}
+                        {!fieldErrors.pincode && pinVerification.verified && (
+                          <div style={{ margin: '4px 0 0', padding: '4px 8px', background: '#f0fdf4', borderRadius: '4px', border: '1px solid #bbf7d0', fontSize: '0.72rem', color: '#166534' }}>
+                            <span style={{ fontWeight: 700 }}>✓ Verified:</span> {pinVerification.verifiedDistrict}, {pinVerification.verifiedState}
+                          </div>
+                        )}
+                        {/* Multiple Post Offices Selection */}
+                        {pinVerification.verified && pinVerification.postOffices && pinVerification.postOffices.length > 1 && (
+                          <div style={{ marginTop: '5px' }}>
+                            <span style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 600 }}>Select Post Office:</span>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '3px' }}>
+                              {pinVerification.postOffices.map((po, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => {
+                                    handleAddressChange('postOffice', po.name);
+                                    if (fieldErrors.postOffice) setFieldErrors(prev => ({ ...prev, postOffice: '' }));
+                                  }}
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    padding: '2px 7px',
+                                    borderRadius: '12px',
+                                    border: addressFields.postOffice === po.name ? '1px solid #16a34a' : '1px solid #cbd5e1',
+                                    background: addressFields.postOffice === po.name ? '#dcfce7' : '#ffffff',
+                                    color: addressFields.postOffice === po.name ? '#166534' : '#334155',
+                                    cursor: 'pointer',
+                                    fontWeight: addressFields.postOffice === po.name ? 700 : 500
+                                  }}
+                                >
+                                  {po.name} {po.deliveryStatus ? `(${po.deliveryStatus})` : ''}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                         )}
                       </div>
                     </div>
