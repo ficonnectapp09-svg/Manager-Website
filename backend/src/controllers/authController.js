@@ -801,7 +801,7 @@ const register = async (req, res) => {
     if (addressObj.pincode) {
       const cleanPin = String(addressObj.pincode).trim().replace(/\D/g, '');
       const pinVerification = await verifyIndianPostalPincode(cleanPin, addressObj.state, addressObj.district);
-      if (!pinVerification.isValid) {
+      if (!pinVerification.isValid && pinVerification.code !== 'LOOKUP_FAILED') {
         return res.status(400).json({
           success: false,
           code: pinVerification.code,
@@ -2418,17 +2418,39 @@ const updateProfilePhoto = async (req, res) => {
       }
     }
 
-    const fileUrl = `/uploads/${file.filename}`;
+    let fileUrl;
+    let fileKey;
+    try {
+      const s3Result = await uploadToS3(file.buffer || file.path, 'manager_avatars', file.originalname || 'profile.jpg');
+      fileUrl = s3Result.url;
+      fileKey = s3Result.key;
+    } catch (s3Err) {
+      console.warn('S3/Cloudinary profile photo upload fallback to local storage:', s3Err.message);
+      const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
+      if (!fs.existsSync(UPLOAD_DIR)) {
+        fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+      }
+      const safeFilename = `avatar_${Date.now()}_${path.basename(file.originalname || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const localFilePath = path.join(UPLOAD_DIR, safeFilename);
+      if (file.buffer) {
+        fs.writeFileSync(localFilePath, file.buffer);
+      } else if (file.path && fs.existsSync(file.path)) {
+        fs.copyFileSync(file.path, localFilePath);
+      }
+      fileUrl = `/uploads/${safeFilename}`;
+      fileKey = safeFilename;
+    }
+
     const userId = req.user?.id || req.user?._id;
 
     let updatedUser = null;
     if (userId) {
       // Update in users collection
-      updatedUser = await db.users.findByIdAndUpdate(userId, { avatarUrl: fileUrl });
+      updatedUser = await db.users.findByIdAndUpdate(userId, { avatarUrl: fileUrl, profileImage: fileUrl });
       if (!updatedUser && db.managers) {
-        updatedUser = await db.managers.findByIdAndUpdate(userId, { avatarUrl: fileUrl });
+        updatedUser = await db.managers.findByIdAndUpdate(userId, { avatarUrl: fileUrl, profileImage: fileUrl });
       } else if (db.managers) {
-        await db.managers.findByIdAndUpdate(userId, { avatarUrl: fileUrl }).catch(() => {});
+        await db.managers.findByIdAndUpdate(userId, { avatarUrl: fileUrl, profileImage: fileUrl }).catch(() => {});
       }
     }
 
@@ -2438,12 +2460,21 @@ const updateProfilePhoto = async (req, res) => {
       avatarUrl: fileUrl,
       user: {
         ...(updatedUser || req.user || {}),
-        avatarUrl: fileUrl
+        avatarUrl: fileUrl,
+        profileImage: fileUrl
+      },
+      file: {
+        name: file.originalname,
+        filename: fileKey,
+        key: fileKey,
+        url: fileUrl,
+        secure_url: fileUrl,
+        size: file.size
       }
     });
   } catch (err) {
     console.error('Update profile photo error:', err);
-    res.status(500).json({ success: false, message: 'Failed to update profile photo.' });
+    res.status(500).json({ success: false, message: 'Profile photo update failed' });
   }
 };
 

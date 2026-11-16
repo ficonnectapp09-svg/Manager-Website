@@ -755,8 +755,8 @@ export default function Register({
         errors.pincode = 'PIN Code is required.';
       } else if (!/^[1-9][0-9]{5}$/.test(cleanPin)) {
         errors.pincode = 'Enter a valid 6-digit Indian PIN Code.';
-      } else if (!pinVerification.verified) {
-        errors.pincode = pinVerification.error || 'Please enter a verified 6-digit Indian PIN Code matching your state and district.';
+      } else if (!pinVerification.verified && pinVerification.error && pinVerification.error !== 'Unable to verify PIN Code right now. Please try again.') {
+        errors.pincode = pinVerification.error;
       }
 
       const pwdErr = validatePassword(password, true);
@@ -2011,7 +2011,7 @@ export default function Register({
                               setFieldErrors(prev => ({ ...prev, pincode: 'PIN Code is required.' }));
                             } else if (!/^[1-9][0-9]{5}$/.test(clean)) {
                               setFieldErrors(prev => ({ ...prev, pincode: 'Enter a valid 6-digit Indian PIN Code.' }));
-                            } else if (!pinVerification.verified && pinVerification.error) {
+                            } else if (!pinVerification.verified && pinVerification.error && pinVerification.error !== 'Unable to verify PIN Code right now. Please try again.') {
                               setFieldErrors(prev => ({ ...prev, pincode: pinVerification.error }));
                             }
                           }}
@@ -2573,34 +2573,27 @@ export default function Register({
                         </div>
                         <input
                           type="text"
-                          maxLength={16}
-                          placeholder="12-digit Aadhaar (e.g. 1234 5678 9012)"
+                          inputMode="numeric"
+                          maxLength={12}
+                          placeholder="12-digit Aadhaar (e.g. 987654321012)"
                           value={aadharNumber}
                           onChange={(e) => {
-                            const val = e.target.value;
-                            setAadharNumber(val);
-                            const clean = cleanAadhaar(val);
-                            if (!val.trim()) {
+                            const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 12);
+                            setAadharNumber(digitsOnly);
+                            if (!digitsOnly) {
                               if (aadharError || fieldErrors.aadharNumber) {
                                 const err = 'Aadhaar number is required.';
                                 setAadharError(err);
                                 setFieldErrors(prev => ({ ...prev, aadharNumber: err }));
                               }
+                            } else if (digitsOnly.length === 12) {
+                              setAadharError('');
+                              setFieldErrors(prev => ({ ...prev, aadharNumber: '' }));
                             } else {
-                              const err = validateAadhaar(val, false);
-                              if (!err && clean.length === 12) {
-                                setAadharError('');
-                                setFieldErrors(prev => ({ ...prev, aadharNumber: '' }));
-                              } else if (aadharError || fieldErrors.aadharNumber) {
-                                const fullErr = validateAadhaar(val, true);
-                                setAadharError(fullErr || '');
-                                setFieldErrors(prev => ({ ...prev, aadharNumber: fullErr || '' }));
-                              } else if (/[^\d\s-]/.test(val) || clean.length > 12) {
-                                const charErr = validateAadhaar(val, false);
-                                if (charErr) {
-                                  setAadharError(charErr);
-                                  setFieldErrors(prev => ({ ...prev, aadharNumber: charErr }));
-                                }
+                              if (aadharError || fieldErrors.aadharNumber) {
+                                const err = 'Aadhaar number must be exactly 12 numeric digits.';
+                                setAadharError(err);
+                                setFieldErrors(prev => ({ ...prev, aadharNumber: err }));
                               }
                             }
                           }}
