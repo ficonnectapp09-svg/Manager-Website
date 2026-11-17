@@ -551,7 +551,7 @@ const getDashboardStats = async (req, res) => {
       recentActivities,
       todayDate: todayKolkataStr
     };
-    }, 15);
+    }, 300);
 
     res.json(payload);
   } catch (err) {
