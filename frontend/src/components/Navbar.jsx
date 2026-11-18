@@ -88,6 +88,9 @@ const Navbar = ({ onNavigate, onToggleMobileSidebar }) => {
     };
   }, [searchOpen]);
 
+  // Lightweight 60s user-scoped lookup cache for unfiltered manager/task search lists
+  const searchLookupCacheRef = useRef({ userId: '', managers: null, tasks: null, fetchedAt: 0 });
+
   // Debounced multi-entity search effect (Managers, Vendors, Shops, Pincodes, Tasks)
   useEffect(() => {
     const q = searchQuery.trim();
@@ -103,12 +106,25 @@ const Navbar = ({ onNavigate, onToggleMobileSidebar }) => {
     const timer = setTimeout(async () => {
       try {
         const qLower = q.toLowerCase();
+        const uid = String(user?._id || user?.id || user?.email || '');
+        const lookupCache = searchLookupCacheRef.current;
+        const isLookupFresh = lookupCache.userId === uid && lookupCache.managers && lookupCache.tasks && (Date.now() - lookupCache.fetchedAt < 60000);
+
         const [vRes, mRes, tRes, sRes] = await Promise.allSettled([
           vendorService.getVendors({ search: q, limit: 6 }),
-          managerService.getManagerDirectory({}, user),
-          taskService.getTasks({}, user),
+          isLookupFresh ? Promise.resolve(lookupCache.managers) : managerService.getManagerDirectory({}, user),
+          isLookupFresh ? Promise.resolve(lookupCache.tasks) : taskService.getTasks({}, user),
           shopVisitService.getShopVisits({ search: q, limit: 6 })
         ]);
+
+        if (!isLookupFresh && mRes.status === 'fulfilled' && tRes.status === 'fulfilled') {
+          searchLookupCacheRef.current = {
+            userId: uid,
+            managers: mRes.value,
+            tasks: tRes.value,
+            fetchedAt: Date.now()
+          };
+        }
 
         if (currentReqId !== searchRequestIdRef.current) return;
 
