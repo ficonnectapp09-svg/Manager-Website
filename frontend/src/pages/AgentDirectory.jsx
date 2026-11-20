@@ -68,7 +68,7 @@ const AgentDirectory = ({ onNavigate, filterParams = {} }) => {
       setError(null);
       const res = await cacheClient.fetchWithCache(
         cacheKey,
-        () => agentService.getAgents({}, user),
+        () => agentService.getAgents({ status: 'active' }, user),
         { force: showSpinner }
       );
       if (Array.isArray(res)) {
@@ -211,24 +211,30 @@ const AgentDirectory = ({ onNavigate, filterParams = {} }) => {
   const isStateManager = managerRole.includes('state');
 
   // Hierarchical Scoping Rules:
-  // Show only Active and Suspended agents, removing all other agents (e.g. Pending KYC)
+  // Show strictly ACTIVE agents (Active or Approved), completely filtering out Pending, Rejected, Suspended, or Inactive agents
   const hierarchicalAgents = useMemo(() => {
-    return Array.isArray(agents) ? agents : [];
+    const list = Array.isArray(agents) ? agents : [];
+    return list.filter(a => {
+      const s = String(a.status || '').toLowerCase();
+      return s === 'active' || s === 'approved';
+    });
   }, [agents]);
 
   const filteredAgents = useMemo(() => {
     const safeList = Array.isArray(hierarchicalAgents) ? hierarchicalAgents : [];
     return safeList.filter(agent => {
+      // 1. Strict Active status enforcement
+      const aStatus = String(agent.status || '').toLowerCase();
+      if (aStatus !== 'active' && aStatus !== 'approved') {
+        return false;
+      }
+
       if (levelFilter !== 'All') {
         const l = resolveLevelStr(agent.level, agent.role);
         if (levelFilter === 'state' && !l.includes('state')) return false;
         if (levelFilter === 'district' && !l.includes('district')) return false;
         if (levelFilter === 'divisional' && !l.includes('division')) return false;
         if (levelFilter === 'pincode' && !l.includes('pincode')) return false;
-      }
-
-      if (statusFilter !== 'All' && agent.status !== statusFilter) {
-        return false;
       }
 
       if (search.trim()) {
@@ -283,13 +289,13 @@ const AgentDirectory = ({ onNavigate, filterParams = {} }) => {
             <span style={{ 
               fontSize: '11px', 
               fontWeight: 700, 
-              background: '#eff6ff', 
-              color: '#2563eb', 
+              background: '#ecfdf5', 
+              color: '#059669', 
               padding: '2px 8px', 
               borderRadius: '20px',
-              border: '1px solid #bfdbfe'
+              border: '1px solid #a7f3d0'
             }}>
-              {hierarchicalAgents.length} Total Agents
+              {hierarchicalAgents.length} Active Agents
             </span>
           </div>
           <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: '4px', margin: 0 }}>
@@ -391,7 +397,7 @@ const AgentDirectory = ({ onNavigate, filterParams = {} }) => {
         }}>
           <div>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
-              Total Field Agents
+              Active Field Agents
             </div>
             <div style={{ fontSize: '1.65rem', fontWeight: 800, color: 'var(--text-main)', marginTop: '4px' }}>
               {hierarchicalAgents.length}
