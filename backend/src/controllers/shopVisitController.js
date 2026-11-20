@@ -418,21 +418,23 @@ const createShopVisit = async (req, res) => {
     let resolvedPhoto = shopPhoto || storefrontPhoto || null;
     let resolvedVoice = voiceNote || audioVoiceNote || null;
 
+    const { uploadToS3 } = require('../config/s3');
+
     if (resolvedPhoto && typeof resolvedPhoto === 'string' && resolvedPhoto.startsWith('data:')) {
       try {
-        const s3Res = await uploadToS3(resolvedPhoto, 'shop_visits', `visit_${Date.now()}`);
-        resolvedPhoto = s3Res.url || s3Res.key;
+        const uploadRes = await uploadToS3(resolvedPhoto, 'shop_visits', `visit_${Date.now()}`);
+        resolvedPhoto = uploadRes.url || uploadRes.key;
       } catch (uploadErr) {
-        console.error('Failed to upload storefront photo to S3:', uploadErr);
+        console.error('Failed to upload storefront photo to Cloudinary:', uploadErr);
       }
     }
 
     if (resolvedVoice && typeof resolvedVoice === 'string' && resolvedVoice.startsWith('data:')) {
       try {
-        const s3Res = await uploadToS3(resolvedVoice, 'voice_notes', `voice_${Date.now()}`);
-        resolvedVoice = s3Res.url || s3Res.key;
+        const uploadRes = await uploadToS3(resolvedVoice, 'voice_notes', `voice_${Date.now()}`);
+        resolvedVoice = uploadRes.url || uploadRes.key;
       } catch (uploadErr) {
-        console.error('Failed to upload voice note to S3:', uploadErr);
+        console.error('Failed to upload voice note to Cloudinary:', uploadErr);
       }
     }
     const resolvedReason = notInterestedReason || (resolvedStatus === 'YES' ? 'Interested in Onboarding' : 'Not specified');

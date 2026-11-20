@@ -1,349 +1,166 @@
-const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
-const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-const { uploadToCloudinary, isCloudinaryConfigured } = require('./cloudinary');
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const dotenv = require('dotenv');
+/**
+ * Storage Adapter — Cloudinary-only implementation
+ *
+ * AWS S3 has been fully removed. All uploads, URL resolution, and media
+ * streaming are handled exclusively by Cloudinary, configured via environment
+ * variables in the backend .env file.
+ *
+ * Required environment variables (set in backend .env):
+ *   CLOUDINARY_URL=cloudinary://<api_key>:<api_secret>@<cloud_name>
+ *   — OR —
+ *   CLOUDINARY_CLOUD_NAME=<cloud_name>
+ *   CLOUDINARY_API_KEY=<api_key>
+ *   CLOUDINARY_API_SECRET=<api_secret>
+ *
+ * This module re-exports the Cloudinary upload function as `uploadToS3` for
+ * backward compatibility — no changes required in any calling controller or route.
+ */
 
-dotenv.config();
-dotenv.config({ path: path.join(__dirname, '../../.env') });
-dotenv.config({ path: path.join(__dirname, '../.env') });
+const {
+  cloudinary,
+  uploadToCloudinary,
+  deleteFromCloudinary,
+  isCloudinaryConfigured,
+  extractPublicId
+} = require('./cloudinary');
 
-const AWS_REGION = process.env.AWS_REGION || '';
-const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET || '';
-
-if (!AWS_REGION || !AWS_S3_BUCKET) {
-  console.warn('[AWS S3 Manager] WARNING: AWS_REGION or AWS_S3_BUCKET environment variable is not set.');
+// ─── Startup configuration guard ───────────────────────────────────────────
+if (!isCloudinaryConfigured()) {
+  console.error(
+    '[Storage] CONFIGURATION ERROR: Cloudinary is not configured.\n' +
+    '  Set CLOUDINARY_URL=cloudinary://<api_key>:<api_secret>@<cloud_name>\n' +
+    '  or set CLOUDINARY_CLOUD_NAME + CLOUDINARY_API_KEY + CLOUDINARY_API_SECRET\n' +
+    '  in the backend .env file before starting the server.'
+  );
 }
 
-let s3ClientInstance = null;
-
-function getS3Client() {
-  const region = process.env.AWS_REGION;
-  const bucket = process.env.AWS_S3_BUCKET;
-  if (!region || !bucket) {
-    throw new Error('[AWS S3] AWS_REGION and AWS_S3_BUCKET must be configured in environment variables.');
+// ─── uploadToS3 — backward-compatible alias for uploadToCloudinary ──────────
+/**
+ * Uploads a file (Buffer, local path, or base64 Data URI) to Cloudinary.
+ * Drop-in replacement for the removed AWS S3 uploadToS3 function.
+ * Returns the same response shape: { success, url, secure_url, key, publicId, ... }
+ *
+ * @param {Buffer|string} fileBufferOrPath - File Buffer, local path, or data: URI
+ * @param {string} folder - Destination folder (e.g. 'manager_avatars', 'voice_notes')
+ * @param {string} filenameHint - Original filename for naming and format detection
+ * @returns {Promise<Object>} Standardised upload result with Cloudinary HTTPS URL
+ */
+async function uploadToS3(fileBufferOrPath, folder = 'manager_uploads', filenameHint = 'upload.jpg') {
+  if (!isCloudinaryConfigured()) {
+    throw new Error(
+      'Storage is not configured. Set CLOUDINARY_URL (or CLOUDINARY_CLOUD_NAME + ' +
+      'CLOUDINARY_API_KEY + CLOUDINARY_API_SECRET) in the backend .env file.'
+    );
   }
-  if (!s3ClientInstance) {
-    s3ClientInstance = new S3Client({ region });
-  }
-  return s3ClientInstance;
+  return uploadToCloudinary(fileBufferOrPath, folder, filenameHint);
 }
 
-const presignedUrlCache = new Map();
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, entry] of presignedUrlCache.entries()) {
-    if (entry.expiresAt <= now) {
-      presignedUrlCache.delete(k);
-    }
+// ─── getDurableImageUrl — returns Cloudinary URL directly ──────────────────
+/**
+ * Returns a durable, publicly accessible URL for the given Cloudinary public ID or URL.
+ * For Cloudinary, the secure_url returned by the uploader is already durable.
+ *
+ * @param {string} publicIdOrUrl - Cloudinary public ID or existing Cloudinary URL
+ * @returns {string} Cloudinary HTTPS URL
+ */
+function getDurableImageUrl(publicIdOrUrl) {
+  if (!publicIdOrUrl) return '';
+  const trimmed = String(publicIdOrUrl).trim();
+  if (trimmed.startsWith('https://res.cloudinary.com/') || trimmed.startsWith('http://res.cloudinary.com/')) {
+    return trimmed.replace('http://', 'https://');
   }
-}, 10 * 60 * 1000).unref?.();
-
-const ALLOWED_MIME_MAP = {
-  // Images (Max 15MB)
-  'image/jpeg': { ext: 'jpg', category: 'image', maxSizeBytes: 15 * 1024 * 1024 },
-  'image/jpg': { ext: 'jpg', category: 'image', maxSizeBytes: 15 * 1024 * 1024 },
-  'image/png': { ext: 'png', category: 'image', maxSizeBytes: 15 * 1024 * 1024 },
-  'image/webp': { ext: 'webp', category: 'image', maxSizeBytes: 15 * 1024 * 1024 },
-  'image/gif': { ext: 'gif', category: 'image', maxSizeBytes: 15 * 1024 * 1024 },
-  'image/avif': { ext: 'avif', category: 'image', maxSizeBytes: 15 * 1024 * 1024 },
-  'image/svg+xml': { ext: 'svg', category: 'image', maxSizeBytes: 5 * 1024 * 1024 },
-
-  // Documents (Max 25MB)
-  'application/pdf': { ext: 'pdf', category: 'document', maxSizeBytes: 25 * 1024 * 1024 },
-  'application/msword': { ext: 'doc', category: 'document', maxSizeBytes: 25 * 1024 * 1024 },
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { ext: 'docx', category: 'document', maxSizeBytes: 25 * 1024 * 1024 },
-  'application/vnd.ms-excel': { ext: 'xls', category: 'document', maxSizeBytes: 25 * 1024 * 1024 },
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { ext: 'xlsx', category: 'document', maxSizeBytes: 25 * 1024 * 1024 },
-  'text/csv': { ext: 'csv', category: 'document', maxSizeBytes: 10 * 1024 * 1024 },
-  'text/plain': { ext: 'txt', category: 'document', maxSizeBytes: 10 * 1024 * 1024 },
-
-  // Audio (Max 20MB)
-  'audio/webm': { ext: 'webm', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'video/webm': { ext: 'webm', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'audio/mpeg': { ext: 'mp3', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'audio/mp3': { ext: 'mp3', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'audio/wav': { ext: 'wav', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'audio/x-wav': { ext: 'wav', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'audio/wave': { ext: 'wav', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'audio/m4a': { ext: 'm4a', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'audio/x-m4a': { ext: 'm4a', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'audio/mp4': { ext: 'm4a', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'audio/ogg': { ext: 'ogg', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'application/ogg': { ext: 'ogg', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 },
-  'audio/aac': { ext: 'aac', category: 'audio', maxSizeBytes: 20 * 1024 * 1024 }
-};
-
-const EXTENSION_TO_MIME = {
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  webp: 'image/webp',
-  gif: 'image/gif',
-  avif: 'image/avif',
-  svg: 'image/svg+xml',
-  pdf: 'application/pdf',
-  doc: 'application/msword',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xls: 'application/vnd.ms-excel',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  csv: 'text/csv',
-  txt: 'text/plain',
-  webm: 'audio/webm',
-  mp3: 'audio/mpeg',
-  wav: 'audio/wav',
-  m4a: 'audio/m4a',
-  ogg: 'audio/ogg',
-  aac: 'audio/aac'
-};
-
-function detectMagicBytes(buf) {
-  if (!Buffer.isBuffer(buf) || buf.length < 4) return null;
-  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
-  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png';
-  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return 'image/gif';
-  if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) return 'application/pdf';
-  if (buf[0] === 0x1A && buf[1] === 0x45 && buf[2] === 0xDF && buf[3] === 0xA3) return 'audio/webm';
-  if (buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) return 'audio/mpeg';
-  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf.length >= 12) {
-    const sub = buf.toString('ascii', 8, 12);
-    if (sub === 'WEBP') return 'image/webp';
-    if (sub === 'WAVE') return 'audio/wav';
-  }
-  if (buf[0] === 0x4F && buf[1] === 0x67 && buf[2] === 0x67 && buf[3] === 0x53) return 'audio/ogg';
-  if (buf[0] === 0x50 && buf[1] === 0x4B && buf[2] === 0x03 && buf[3] === 0x04) return 'application/zip';
-  return null;
-}
-
-function extractS3Key(urlOrKey) {
-  if (!urlOrKey || typeof urlOrKey !== 'string') return null;
-  const trimmed = urlOrKey.trim();
-  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || trimmed.startsWith('https://res.cloudinary.com/')) {
-    return null;
-  }
-  const mediaMatch = trimmed.match(/\/api\/(?:media|uploads)\/s3\/([^?#]+)/i);
-  if (mediaMatch && mediaMatch[1]) {
-    return decodeURIComponent(mediaMatch[1]).replace(/^\/+/, '');
-  }
-  const cfDomain = (process.env.AWS_CLOUDFRONT_URL || process.env.CLOUDFRONT_URL || '').replace(/https?:\/\//i, '').replace(/\/+$/, '');
-  if (cfDomain && trimmed.includes(cfDomain)) {
+  // If it looks like a Cloudinary public ID, build the URL
+  if (trimmed && !trimmed.startsWith('http')) {
     try {
-      const parsed = new URL(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
-      return decodeURIComponent(parsed.pathname).replace(/^\/+/, '');
+      const cloudName = process.env.CLOUDINARY_CLOUD_NAME ||
+        (process.env.CLOUDINARY_URL && process.env.CLOUDINARY_URL.split('@')[1]) || '';
+      if (cloudName) {
+        return `https://res.cloudinary.com/${cloudName}/image/upload/${trimmed}`;
+      }
     } catch {}
   }
-  if (trimmed.includes('amazonaws.com')) {
-    try {
-      const parsed = new URL(trimmed);
-      let p = decodeURIComponent(parsed.pathname).replace(/^\/+/, '');
-      const parts = p.split('/');
-      if (parts.length > 1 && ['products', 'manager_docs', 'manager_images', 'manager_avatars', 'voice_notes', 'kyc', 'documents', 'storefronts'].includes(parts[1])) {
-        p = parts.slice(1).join('/');
-      }
-      return p;
-    } catch {
-      const match = trimmed.match(/amazonaws\.com\/([^?#]+)/);
-      if (match && match[1]) return decodeURIComponent(match[1]).replace(/^\/+/, '');
-    }
-  }
-  if (/^[a-zA-Z0-9_\-]+\/[a-zA-Z0-9_\-\.]+\.(jpg|jpeg|png|webp|gif|avif|svg|pdf|doc|docx|xls|xlsx|csv|txt|webm|mp3|wav|m4a|ogg|aac)$/i.test(trimmed)) {
-    return trimmed;
-  }
-  return null;
+  return trimmed;
 }
 
-function getDurableImageUrl(objectKey) {
-  if (!objectKey) return '';
-  const cleanKey = objectKey.replace(/^\/+/, '');
-  const cloudfrontDomain = process.env.AWS_CLOUDFRONT_URL || process.env.CLOUDFRONT_URL;
-  if (cloudfrontDomain) {
-    const cfBase = cloudfrontDomain.startsWith('http') ? cloudfrontDomain : `https://${cloudfrontDomain}`;
-    return `${cfBase.replace(/\/+$/, '')}/${cleanKey}`;
-  }
-  const backendBase = process.env.BACKEND_URL || 'https://manager-website.onrender.com';
-  return `${backendBase.replace(/\/+$/, '')}/api/media/s3/${cleanKey}`;
-}
-
+// ─── resolveDurableImageUrl — normalises any stored URL ───────────────────
+/**
+ * Resolves any stored URL/key into a fully-qualified HTTPS URL suitable for display.
+ *
+ * @param {string} input - Cloudinary URL, relative path, or public ID
+ * @returns {string} Resolved HTTPS URL
+ */
 function resolveDurableImageUrl(input) {
   if (!input || typeof input !== 'string') return '';
   const trimmed = input.trim();
   if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return '';
   if (trimmed.startsWith('https://res.cloudinary.com/')) return trimmed;
+  if (trimmed.startsWith('http://res.cloudinary.com/')) return trimmed.replace('http://', 'https://');
   if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return trimmed;
   if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) return trimmed;
-  if (trimmed.includes('/api/media/s3/') || trimmed.includes('/api/uploads/s3/')) return trimmed;
-  const cfDomain = (process.env.AWS_CLOUDFRONT_URL || process.env.CLOUDFRONT_URL || '').replace(/https?:\/\//i, '').replace(/\/+$/, '');
-  if (cfDomain && trimmed.includes(cfDomain)) return trimmed;
-  const key = extractS3Key(trimmed);
-  if (key) return getDurableImageUrl(key);
-  return trimmed;
+  return getDurableImageUrl(trimmed);
 }
 
-async function getPresignedUrl(key, expiresIn = 3600) {
-  if (!key || typeof key !== 'string') return '';
-  const cleanKey = extractS3Key(key) || key.replace(/^\/+/, '');
-  const cacheKey = `${cleanKey}:${expiresIn}`;
-  const cached = presignedUrlCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now() + 60000) {
-    return cached.url;
-  }
-  const bucket = process.env.AWS_S3_BUCKET;
-  const client = getS3Client();
-  const command = new GetObjectCommand({
-    Bucket: bucket,
-    Key: cleanKey
-  });
-  const signedUrl = await getSignedUrl(client, command, { expiresIn });
-  presignedUrlCache.set(cacheKey, {
-    url: signedUrl,
-    expiresAt: Date.now() + (expiresIn - 60) * 1000
-  });
-  return signedUrl;
+// ─── extractS3Key — extracts Cloudinary public ID from URL ─────────────────
+/**
+ * Extracts the Cloudinary public ID from a Cloudinary URL.
+ * Named extractS3Key for backward compatibility.
+ *
+ * @param {string} urlOrKey - Cloudinary URL or public ID
+ * @returns {string|null} Cloudinary public ID, or null if not extractable
+ */
+function extractS3Key(urlOrKey) {
+  if (!urlOrKey || typeof urlOrKey !== 'string') return null;
+  return extractPublicId(urlOrKey);
 }
 
-async function getObjectStream(key) {
-  try {
-    const bucket = process.env.AWS_S3_BUCKET;
-    const client = getS3Client();
-    const cleanKey = key.replace(/^\/+/, '');
-    const command = new GetObjectCommand({
-      Bucket: bucket,
-      Key: cleanKey
-    });
-    const response = await client.send(command);
-    return {
-      success: true,
-      body: response.Body,
-      contentType: response.ContentType || 'application/octet-stream',
-      contentLength: response.ContentLength,
-      etag: response.ETag
-    };
-  } catch (err) {
-    return {
-      success: false,
-      error: err.name === 'NoSuchKey' ? 'Object not found in S3 bucket' : (err.message || 'Failed to fetch object from S3')
-    };
-  }
+// ─── getPresignedUrl — Cloudinary URLs are direct HTTPS; no presigning needed
+/**
+ * Returns the Cloudinary URL directly.
+ * Cloudinary CDN URLs are publicly accessible HTTPS URLs — no presigning required.
+ *
+ * @param {string} keyOrUrl - Cloudinary public ID or URL
+ * @returns {Promise<string>} Cloudinary HTTPS URL
+ */
+async function getPresignedUrl(keyOrUrl) {
+  if (!keyOrUrl) return '';
+  return getDurableImageUrl(keyOrUrl);
 }
 
-async function uploadToS3(fileBufferOrPath, folder = 'manager_uploads', filenameHint = 'upload.jpg') {
-  if (isCloudinaryConfigured()) {
-    try {
-      const cRes = await uploadToCloudinary(fileBufferOrPath, folder, filenameHint);
-      return cRes;
-    } catch (cErr) {
-      console.warn('[Storage] Cloudinary upload attempted, falling back to S3:', cErr.message);
-    }
-  }
+// ─── getObjectStream — not applicable for Cloudinary ─────────────────────
+/**
+ * Not applicable for Cloudinary (CDN URLs are served directly).
+ * Returns a failure result so callers that check .success can handle gracefully.
+ */
+async function getObjectStream(_key) {
+  return {
+    success: false,
+    error: 'Direct S3 object streaming is not supported. Media is served via Cloudinary CDN URLs.'
+  };
+}
 
-  try {
-    let buffer;
-    let hint = filenameHint;
-
-    if (Buffer.isBuffer(fileBufferOrPath)) {
-      buffer = fileBufferOrPath;
-    } else if (typeof fileBufferOrPath === 'string') {
-      const trimmed = fileBufferOrPath.trim();
-      if (trimmed.startsWith('https://res.cloudinary.com/')) {
-        return trimmed;
-      }
-      if (trimmed.includes('/api/media/s3/')) {
-        return trimmed;
-      }
-      if (trimmed.includes('amazonaws.com')) {
-        const existingKey = extractS3Key(trimmed);
-        if (existingKey) return getDurableImageUrl(existingKey);
-      }
-      if (fs.existsSync(trimmed)) {
-        buffer = fs.readFileSync(trimmed);
-        hint = path.basename(trimmed);
-      } else if (trimmed.startsWith('data:')) {
-        const match = trimmed.match(/^data:([^;]+);base64,(.+)$/s);
-        if (match) {
-          buffer = Buffer.from(match[2], 'base64');
-          const extFromMime = ALLOWED_MIME_MAP[match[1].toLowerCase()]?.ext || 'jpg';
-          hint = `upload.${extFromMime}`;
-        } else {
-          throw new Error('Malformed base64 data string');
-        }
-      } else {
-        throw new Error('Invalid file path or data provided for S3 upload');
-      }
-    } else {
-      throw new Error('File payload must be a Buffer or file path string');
-    }
-
-    let ext = path.extname(hint || '').replace('.', '').toLowerCase() || 'jpg';
-    let mimeType = EXTENSION_TO_MIME[ext] || 'application/octet-stream';
-
-    const magicMime = detectMagicBytes(buffer);
-    if (magicMime && ALLOWED_MIME_MAP[magicMime]) {
-      mimeType = magicMime;
-      ext = ALLOWED_MIME_MAP[magicMime].ext;
-    }
-
-    const mimeConfig = ALLOWED_MIME_MAP[mimeType] || { category: 'file', maxSizeBytes: 15 * 1024 * 1024, ext };
-    if (!ALLOWED_MIME_MAP[mimeType]) {
-      throw new Error(`File format '${mimeType}' is not supported.`);
-    }
-
-    if (buffer.length > mimeConfig.maxSizeBytes) {
-      const maxMb = Math.round(mimeConfig.maxSizeBytes / (1024 * 1024));
-      throw new Error(`Payload size exceeds maximum limit of ${maxMb} MB for ${mimeConfig.category}s.`);
-    }
-
-    const bucket = process.env.AWS_S3_BUCKET;
-    const client = getS3Client();
-
-    const safeFolder = String(folder || 'manager_uploads').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const randSuffix = crypto.randomBytes(8).toString('hex');
-    const objectKey = `${safeFolder}/${Date.now()}-${randSuffix}.${ext}`;
-
-    const putCommand = new PutObjectCommand({
-      Bucket: bucket,
-      Key: objectKey,
-      Body: buffer,
-      ContentType: mimeType,
-      Metadata: {
-        'original-name': encodeURIComponent(path.basename(hint || 'file')),
-        category: mimeConfig.category
-      }
-    });
-
-    await client.send(putCommand);
-
-    const durableUrl = getDurableImageUrl(objectKey);
-
-    const resultObj = {
-      success: true,
-      url: durableUrl,
-      secure_url: durableUrl,
-      key: objectKey,
-      publicId: objectKey,
-      category: mimeConfig.category,
-      mimeType,
-      extension: ext,
-      size: buffer.length,
-      toString() { return durableUrl; },
-      [Symbol.toPrimitive](hint) { return durableUrl; }
-    };
-
-    return resultObj;
-  } catch (err) {
-    console.error('[AWS S3 Manager Upload Error]:', err.message);
-    throw new Error(`Failed to upload file to AWS S3: ${err.message}`);
-  }
+// ─── getS3Client — removed; no S3 client exists ───────────────────────────
+function getS3Client() {
+  throw new Error(
+    'AWS S3 has been removed from this project. All storage uses Cloudinary. ' +
+    'Configure CLOUDINARY_URL in the backend .env file.'
+  );
 }
 
 module.exports = {
+  // Primary upload function (Cloudinary-backed)
   uploadToS3,
   uploadToCloudinary,
-  getPresignedUrl,
+  deleteFromCloudinary,
+  isCloudinaryConfigured,
+
+  // URL helpers
   getDurableImageUrl,
   resolveDurableImageUrl,
   extractS3Key,
+  extractPublicId,
+
+  // Legacy compatibility stubs
+  getPresignedUrl,
   getObjectStream,
   getS3Client
 };

@@ -603,21 +603,23 @@ const updateTaskStatus = async (req, res) => {
         });
       }
 
+      const { uploadToS3 } = require('../config/s3');
+
       if (photo && typeof photo === 'string' && photo.startsWith('data:')) {
         try {
-          const s3Res = await uploadToS3(photo, 'tasks', `task_${taskId}_${Date.now()}`);
-          photo = s3Res.url || s3Res.key;
+          const uploadRes = await uploadToS3(photo, 'tasks', `task_${taskId}_${Date.now()}`);
+          photo = uploadRes.url || uploadRes.key;
         } catch (err) {
-          console.error('Failed to upload task photo to S3:', err);
+          console.error('Failed to upload task photo to Cloudinary:', err);
         }
       }
 
       if (audio && typeof audio === 'string' && audio.startsWith('data:')) {
         try {
-          const s3Res = await uploadToS3(audio, 'voice_notes', `task_audio_${taskId}_${Date.now()}`);
-          audio = s3Res.url || s3Res.key;
+          const uploadRes = await uploadToS3(audio, 'voice_notes', `task_audio_${taskId}_${Date.now()}`);
+          audio = uploadRes.url || uploadRes.key;
         } catch (err) {
-          console.error('Failed to upload task audio to S3:', err);
+          console.error('Failed to upload task audio to Cloudinary:', err);
         }
       }
 
