@@ -49,6 +49,15 @@ const ROLE_LEVELS = {
   pincode_manager: 4
 };
 
+const sanitizeAvatarUrl = (url) => {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined' || trimmed.includes('/uploads/undefined') || trimmed.includes('undefined')) {
+    return null;
+  }
+  return trimmed;
+};
+
 // Helper: Calculate occupancy for a location and role
 const getOccupancy = async (role, { stateId, districtId, divisionId, pincodeId }) => {
   const [users, managers] = await Promise.all([
@@ -558,7 +567,7 @@ const login = async (req, res) => {
       aadharNumber: user.aadharNumber || user.documents?.aadharNumber || null,
       panNumber: user.panNumber || user.documents?.panNumber || null,
       documents: user.documents || {},
-      avatarUrl: user.avatarUrl || null,
+      avatarUrl: sanitizeAvatarUrl(user.avatarUrl),
       bankDetails: await resolveUserBankDetails(user),
       bankAccount: await resolveUserBankDetails(user),
       scope: {
@@ -2387,10 +2396,10 @@ const uploadAvatar = async (req, res) => {
     res.json({
       success: true,
       message: 'Profile photo uploaded successfully',
-      avatarUrl: fileUrl,
+      avatarUrl: sanitizeAvatarUrl(fileUrl),
       file: {
         name: file.originalname,
-        filename: file.filename,
+        filename: file.filename || path.basename(fileUrl || file.originalname || 'avatar.jpg'),
         url: fileUrl,
         size: file.size
       }
@@ -3059,7 +3068,7 @@ const verifyOtp = async (req, res) => {
       gender: user.gender || null,
       address: user.address || null,
       documents: user.documents || {},
-      avatarUrl: user.avatarUrl || null,
+      avatarUrl: sanitizeAvatarUrl(user.avatarUrl),
       bankDetails: await resolveUserBankDetails(user),
       bankAccount: await resolveUserBankDetails(user),
       regionId: user.regionId || user.stateId,

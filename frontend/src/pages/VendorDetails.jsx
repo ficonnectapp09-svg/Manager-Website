@@ -60,10 +60,12 @@ const isVendorDraftIncomplete = (v) => {
 };
 
 const resolveMediaUrl = (url) => {
-  if (!url) return '';
-  if (url.startsWith('data:') || url.startsWith('blob:')) return url;
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  const cleanUrl = url.startsWith('/') ? url : `/${url}`;
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined' || trimmed.includes('/undefined')) return '';
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return trimmed;
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+  const cleanUrl = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
   const backendBase = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || 'https://manager-website.onrender.com/api';
   const cleanBase = backendBase.replace(/\/api\/?$/, '').replace(/\/+$/, '');
   if (typeof window !== 'undefined' && window.location.protocol === 'https:') {

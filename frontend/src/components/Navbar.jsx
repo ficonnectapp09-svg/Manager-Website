@@ -25,7 +25,8 @@ const Navbar = ({ onNavigate, onToggleMobileSidebar }) => {
   const searchInputRef = useRef(null);
   const searchRequestIdRef = useRef(0);
 
-  const userPhoto = user?.avatarUrl || user?.avatar || user?.profilePhoto || user?.image || user?.profileImage || null;
+  const rawPhoto = user?.avatarUrl || user?.avatar || user?.profilePhoto || user?.image || user?.profileImage || null;
+  const userPhoto = (rawPhoto && typeof rawPhoto === 'string' && !rawPhoto.includes('undefined') && !rawPhoto.includes('null') && rawPhoto.trim() !== '') ? rawPhoto.trim() : null;
 
   useEffect(() => {
     setAvatarError(false);

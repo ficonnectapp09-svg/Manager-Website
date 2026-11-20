@@ -852,7 +852,7 @@ const FieldManagers = ({ filterParams }) => {
                         flexShrink: 0,
                         overflow: 'hidden'
                       }}>
-                        {m.avatarUrl ? (
+                        {m.avatarUrl && !m.avatarUrl.includes('undefined') ? (
                           <img
                             src={m.avatarUrl}
                             alt={m.name}
@@ -1019,7 +1019,7 @@ const FieldManagers = ({ filterParams }) => {
                   flexShrink: 0,
                   overflow: 'hidden'
                 }}>
-                  {selectedManager.avatarUrl ? (
+                  {selectedManager.avatarUrl && !selectedManager.avatarUrl.includes('undefined') ? (
                     <img
                       src={selectedManager.avatarUrl}
                       alt={selectedManager.name}

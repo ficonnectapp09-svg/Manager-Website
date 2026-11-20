@@ -261,6 +261,9 @@ const Profile = () => {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const fileInputRef = useRef(null);
 
+  const rawUserAvatar = user?.avatarUrl || user?.avatar || user?.profilePhoto || user?.image;
+  const validUserAvatar = (rawUserAvatar && typeof rawUserAvatar === 'string' && !rawUserAvatar.includes('undefined') && !rawUserAvatar.includes('null') && rawUserAvatar.trim() !== '') ? rawUserAvatar.trim() : null;
+
   const handlePhotoSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -482,9 +485,9 @@ const Profile = () => {
                   }}>
                     {photoPreview ? (
                       <img src={photoPreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    ) : (user?.avatarUrl || user?.avatar || user?.profilePhoto || user?.image) ? (
+                    ) : validUserAvatar ? (
                       <img
-                        src={user?.avatarUrl || user?.avatar || user?.profilePhoto || user?.image}
+                        src={validUserAvatar}
                         alt={user.name}
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                         onError={(e) => {
@@ -594,10 +597,10 @@ const Profile = () => {
                         }}
                       >
                         <Camera size={12} color="var(--forge-gold, #f59e0b)" />
-                        <span>{(user?.avatarUrl || user?.avatar || user?.profilePhoto || user?.image) ? 'Change Photo' : 'Upload Photo'}</span>
+                        <span>{validUserAvatar ? 'Change Photo' : 'Upload Photo'}</span>
                       </button>
 
-                      {(user?.avatarUrl || user?.avatar || user?.profilePhoto || user?.image) && !confirmRemove && (
+                      {validUserAvatar && !confirmRemove && (
                         <button
                           type="button"
                           onClick={() => setConfirmRemove(true)}
