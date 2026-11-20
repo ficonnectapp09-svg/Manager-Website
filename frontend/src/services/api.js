@@ -1,4 +1,7 @@
-const rawApiUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || (typeof process !== 'undefined' && process.env && process.env.VITE_API_URL) || '';
+let rawApiUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || (typeof process !== 'undefined' && process.env && process.env.VITE_API_URL) || '';
+if (rawApiUrl && rawApiUrl.includes('connect-manager.onrender.com')) {
+  rawApiUrl = rawApiUrl.replace('connect-manager.onrender.com', 'manager-website.onrender.com');
+}
 const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
 const isRemoteHttp = rawApiUrl && rawApiUrl.startsWith('http://');
 

@@ -23,18 +23,28 @@ class WebSocketClient {
   getWsUrl(token) {
     if (typeof window === 'undefined') return null;
 
-    if (import.meta.env.VITE_WS_URL) {
-      return `${import.meta.env.VITE_WS_URL}?token=${token}`;
+    let wsUrl = import.meta.env.VITE_WS_URL || '';
+    let apiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+
+    // Normalize any legacy/suspended connect-manager domain
+    if (wsUrl.includes('connect-manager.onrender.com')) {
+      wsUrl = wsUrl.replace('connect-manager.onrender.com', 'manager-website.onrender.com');
+    }
+    if (apiUrl.includes('connect-manager.onrender.com')) {
+      apiUrl = apiUrl.replace('connect-manager.onrender.com', 'manager-website.onrender.com');
     }
 
-    const apiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+    if (wsUrl) {
+      return `${wsUrl}?token=${token}`;
+    }
+
     if (apiUrl.includes('onrender.com')) {
       const wsOrigin = apiUrl.replace(/^http/, 'ws');
       return `${wsOrigin}/ws?token=${token}`;
     }
 
     // Default Render production WSS endpoint (derived from VITE_API_URL env var)
-    const wsApiBase = (import.meta.env.VITE_API_URL || 'https://manager-website.onrender.com/api').replace(/^http/, 'ws').replace(/\/api\/?$/, '');
+    const wsApiBase = (apiUrl || 'https://manager-website.onrender.com/api').replace(/^http/, 'ws').replace(/\/api\/?$/, '');
     if (window.location.protocol === 'https:' || window.location.hostname.endsWith('vercel.app')) {
       return `${wsApiBase}/ws?token=${token}`;
     }

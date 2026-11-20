@@ -3,7 +3,8 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const backendTarget = env.VITE_API_URL || 'https://connect-manager.onrender.com';
+  const rawTarget = env.VITE_API_URL || 'https://manager-website.onrender.com';
+  const backendTarget = rawTarget.replace('connect-manager.onrender.com', 'manager-website.onrender.com');
 
   return {
     plugins: [react()],
