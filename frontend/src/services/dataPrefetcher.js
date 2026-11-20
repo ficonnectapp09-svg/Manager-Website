@@ -62,11 +62,11 @@ class DataPrefetcher {
         } catch (e) {}
       },
 
-      // 3. Primary Vendors list (page 1)
+      // 3. Primary Vendors list (page 1 - active vendors only)
       async () => {
         try {
-          const params = { page: 1, limit: 10 };
-          const key = `vendors:list:${userId}:${JSON.stringify(params)}`;
+          const params = { page: 1, limit: 10, activeOnly: true };
+          const key = `vendors:active:${userId}:${JSON.stringify(params)}`;
           await cacheClient.fetchWithCache(key, () => vendorService.getVendors(params));
         } catch (e) {}
       },

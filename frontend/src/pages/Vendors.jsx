@@ -27,7 +27,28 @@ const CATEGORIES = [
   'Jobs'
 ];
 
-const STATUSES = ['All', 'Active', 'Approved', 'Pending', 'Pending Admin Review', 'Suspended', 'Rejected', 'Inactive'];
+const STATUSES = ['All', 'Active', 'Approved'];
+
+// Determine if vendor is active and approved (strictly exclude pending and under review)
+const isVendorActive = (v) => {
+  if (!v) return false;
+  const status = String(v.status || '').toLowerCase().trim();
+  const approval = String(v.approvalStatus || '').toLowerCase().trim();
+  const opStatus = String(v.operationalStatus || '').toLowerCase().trim();
+
+  // Exclude pending, under review, rejected, suspended, incomplete drafts
+  if (status.includes('pending') || approval.includes('pending')) return false;
+  if (status.includes('review') || approval.includes('review')) return false;
+  if (status.includes('reject') || approval.includes('reject')) return false;
+  if (status === 'suspended' || approval === 'suspended' || opStatus === 'suspended' || v.isSuspended === true) return false;
+  if (v.isDraft === true || v.isOnboardingCompleted === false) return false;
+
+  // Must be approved or active
+  const isApproved = status === 'approved' || approval.includes('approved') || v.isApproved === true;
+  const isActive = status === 'active' || opStatus === 'active' || v.isActive === true;
+
+  return isApproved || isActive;
+};
 
 const isVendorDraftIncomplete = (v) => {
   if (!v) return false;
@@ -172,9 +193,10 @@ const Vendors = ({ onNavigate, filterParams = {}, onOpenOnboard }) => {
       status: status !== 'All' ? status : undefined,
       districtId: districtId || undefined,
       divisionId: divisionId || undefined,
-      pincodeId: pincodeId || undefined
+      pincodeId: pincodeId || undefined,
+      activeOnly: true
     };
-    return `vendors:list:${user?.id || 'mgr'}:${JSON.stringify(p)}`;
+    return `vendors:active:${user?.id || 'mgr'}:${JSON.stringify(p)}`;
   };
 
   const loadVendors = async (page = 1, force = false) => {
@@ -182,9 +204,10 @@ const Vendors = ({ onNavigate, filterParams = {}, onOpenOnboard }) => {
     const cached = cacheClient.get(key);
 
     if (cached?.data) {
-      const list = Array.isArray(cached.data.data) 
+      const rawList = Array.isArray(cached.data.data) 
         ? cached.data.data 
         : (Array.isArray(cached.data) ? cached.data : []);
+      const list = rawList.filter(isVendorActive);
       setVendors(list);
       setPagination(cached.data.pagination || { page: 1, limit: 10, total: list.length, totalPages: 1 });
       setLoading(false);
@@ -201,11 +224,13 @@ const Vendors = ({ onNavigate, filterParams = {}, onOpenOnboard }) => {
         status: status !== 'All' ? status : undefined,
         districtId: districtId || undefined,
         divisionId: divisionId || undefined,
-        pincodeId: pincodeId || undefined
+        pincodeId: pincodeId || undefined,
+        activeOnly: true
       };
       const res = await cacheClient.fetchWithCache(key, () => vendorService.getVendors(params), { force });
       if (res && res.success) {
-        const list = Array.isArray(res.data) ? res.data : (Array.isArray(res) ? res : []);
+        const rawList = Array.isArray(res.data) ? res.data : (Array.isArray(res) ? res : []);
+        const list = rawList.filter(isVendorActive);
         setVendors(list);
         setPagination(res.pagination || { page: 1, limit: 10, total: list.length, totalPages: 1 });
       }
@@ -223,7 +248,11 @@ const Vendors = ({ onNavigate, filterParams = {}, onOpenOnboard }) => {
   // Real-time synchronization without manual refresh
   useRealtime('vendor', (event) => {
     if (event.action === 'updated' && event.data) {
-      setVendors(prev => applyRealtimeUpdate(prev, event));
+      if (!isVendorActive(event.data)) {
+        setVendors(prev => prev.filter(v => String(v._id || v.id) !== String(event.data._id || event.data.id)));
+      } else {
+        setVendors(prev => applyRealtimeUpdate(prev, event));
+      }
     } else {
       cacheClient.invalidateQueries('vendors');
       loadVendors(pagination.page || 1, true);
@@ -419,15 +448,15 @@ const Vendors = ({ onNavigate, filterParams = {}, onOpenOnboard }) => {
                   Loading vendors within your scope...
                 </td>
               </tr>
-            ) : (Array.isArray(vendors) ? vendors : []).length === 0 ? (
+            ) : (Array.isArray(vendors) ? vendors : []).filter(isVendorActive).length === 0 ? (
               <tr>
                 <td colSpan="7" style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
                   <Store size={36} style={{ margin: '0 auto 8px', color: '#cbd5e1', display: 'block' }} />
-                  <div>No vendors found matching your current scope & filters.</div>
+                  <div>No active vendors found matching your current scope & filters.</div>
                 </td>
               </tr>
             ) : (
-              (Array.isArray(vendors) ? vendors : []).map((v, index) => (
+              (Array.isArray(vendors) ? vendors : []).filter(isVendorActive).map((v, index) => (
                 <tr key={v._id}>
                   <td style={{ textAlign: 'center', paddingLeft: '16px', fontWeight: 600, color: '#64748b', fontSize: '0.82rem' }}>
                     {(pagination?.page ? (pagination.page - 1) * (pagination.limit || 10) : 0) + index + 1}
@@ -546,7 +575,7 @@ const Vendors = ({ onNavigate, filterParams = {}, onOpenOnboard }) => {
           color: 'var(--text-muted)'
         }}>
           <div>
-            Showing {vendors.length > 0 ? (pagination.page - 1) * pagination.limit + 1 : 0} to{' '}
+            Showing {(Array.isArray(vendors) ? vendors : []).filter(isVendorActive).length > 0 ? (pagination.page - 1) * pagination.limit + 1 : 0} to{' '}
             {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total} entries
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

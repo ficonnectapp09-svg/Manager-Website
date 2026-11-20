@@ -371,6 +371,7 @@ const getVendors = async (req, res) => {
       districtId,
       divisionId,
       pincodeId,
+      activeOnly,
       page = 1,
       limit = 10,
       sortBy = 'createdAt',
@@ -402,6 +403,23 @@ const getVendors = async (req, res) => {
         return false;
       }
 
+      // Active vendors filter: exclude pending, under review, rejected, suspended, drafts
+      if (activeOnly === 'true' || activeOnly === true || activeOnly === '1') {
+        const vStatus = String(v.status || '').toLowerCase().trim();
+        const vApproval = String(v.approvalStatus || '').toLowerCase().trim();
+        const vOp = String(v.operationalStatus || '').toLowerCase().trim();
+
+        if (vStatus.includes('pending') || vApproval.includes('pending')) return false;
+        if (vStatus.includes('review') || vApproval.includes('review')) return false;
+        if (vStatus.includes('reject') || vApproval.includes('reject')) return false;
+        if (vStatus === 'suspended' || vApproval === 'suspended' || vOp === 'suspended' || v.isSuspended === true) return false;
+        if (v.isDraft === true || v.isOnboardingCompleted === false) return false;
+
+        const isApproved = vStatus === 'approved' || vApproval.includes('approved') || v.isApproved === true;
+        const isActive = vStatus === 'active' || vOp === 'active' || v.isActive === true;
+        if (!isApproved && !isActive) return false;
+      }
+
       // 1. Search filter: matches vendor name, business name, registration ID, or mobile
       if (search && search.trim()) {
         const q = search.trim().toLowerCase();
@@ -424,9 +442,12 @@ const getVendors = async (req, res) => {
         const vOp = (v.operationalStatus || '').toLowerCase();
 
         if (sQuery === 'approved') {
-          if (vStatus !== 'approved' && !vApproval.includes('approved')) return false;
+          if (vStatus !== 'approved' && !vApproval.includes('approved') && !v.isApproved) return false;
         } else if (sQuery === 'active') {
-          if (vStatus !== 'active' && vOp !== 'active') return false;
+          const isApproved = vStatus === 'approved' || vApproval.includes('approved') || v.isApproved === true;
+          const isActive = vStatus === 'active' || vOp === 'active' || v.isActive === true;
+          const isPending = vStatus.includes('pending') || vApproval.includes('pending') || vStatus.includes('review') || vApproval.includes('review');
+          if (isPending || (!isApproved && !isActive)) return false;
         } else if (sQuery === 'pending') {
           if (vStatus !== 'pending' && !vApproval.includes('pending') && vStatus !== 'under review' && vStatus !== 'under_review' && !vApproval.includes('review')) return false;
         } else if (sQuery === 'pending admin review' || sQuery === 'pending_pincode_approval' || sQuery === 'pending_admin_review') {
