@@ -121,6 +121,7 @@ class RealtimeWebSocketServer {
       ws.isAuthenticated = true;
       ws.user = {
         id: decoded.id || decoded._id,
+        managerId: decoded.managerId || null,
         email: decoded.email,
         role: decoded.role || 'user',
         level: decoded.level || 4,
@@ -168,7 +169,8 @@ class RealtimeWebSocketServer {
       const target = String(scope.targetUserId).toLowerCase();
       const clientUid = String(user.id || '').toLowerCase();
       const clientEmail = String(user.email || '').toLowerCase();
-      if (target !== clientUid && target !== clientEmail) {
+      const clientManagerId = String(user.managerId || '').toLowerCase();
+      if (target !== clientUid && target !== clientEmail && (!clientManagerId || target !== clientManagerId)) {
         return false;
       }
     }

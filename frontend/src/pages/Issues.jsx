@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { issueService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useRealtime } from '../realtime';
 import { resolveUserTerritoryProfile } from '../utils/territoryScoping';
 
 const Issues = ({ onNavigate, filterParams }) => {
@@ -78,6 +79,11 @@ const Issues = ({ onNavigate, filterParams }) => {
   useEffect(() => {
     fetchIssues();
   }, [user, statusFilter, priorityFilter]);
+
+  // Real-time synchronization without manual refresh
+  useRealtime('issue', () => {
+    fetchIssues(true);
+  });
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();

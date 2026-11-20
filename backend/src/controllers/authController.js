@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const db = require('../config/db');
+const { publishEntityEvent, cacheManager } = require('../realtime');
 const { JWT_SECRET } = require('../middleware/authMiddleware');
 const {
   ALLOWED_MANAGER_ROLES,
@@ -2461,6 +2462,16 @@ const updateProfilePhoto = async (req, res) => {
       } else if (db.managers) {
         await db.managers.findByIdAndUpdate(userId, { avatarUrl: fileUrl, profileImage: fileUrl }).catch(() => {});
       }
+
+      // Broadcast real-time ecosystem event for cross-platform synchronization
+      publishEntityEvent({
+        entity: 'manager',
+        action: 'updated',
+        entityId: userId,
+        data: { id: userId, avatarUrl: fileUrl, profileImage: fileUrl },
+        scope: { targetUserId: userId }
+      });
+      await cacheManager.invalidateEntity('manager', userId).catch(() => null);
     }
 
     res.json({
@@ -2528,6 +2539,16 @@ const removeProfilePhoto = async (req, res) => {
     } else if (db.managers) {
       await db.managers.findByIdAndUpdate(userId, clearPhotoUpdate).catch(() => {});
     }
+
+    // Broadcast real-time ecosystem event for cross-platform synchronization
+    publishEntityEvent({
+      entity: 'manager',
+      action: 'updated',
+      entityId: userId,
+      data: { id: userId, avatarUrl: null, profileImage: null },
+      scope: { targetUserId: userId }
+    });
+    await cacheManager.invalidateEntity('manager', userId).catch(() => null);
 
     res.json({
       success: true,

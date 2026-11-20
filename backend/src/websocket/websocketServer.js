@@ -141,6 +141,7 @@ class RealtimeWebSocketServer {
 
       ws.user = {
         id: decoded.id || decoded._id,
+        managerId: decoded.managerId || null,
         email: decoded.email,
         role: (decoded.role || 'user').toLowerCase(),
         level: decoded.level || 4,
@@ -188,8 +189,9 @@ class RealtimeWebSocketServer {
       const target = String(scope.targetUserId).toLowerCase();
       const clientUid = String(user.id || '').toLowerCase();
       const clientEmail = String(user.email || '').toLowerCase();
+      const clientManagerId = String(user.managerId || '').toLowerCase();
       // If client is the explicitly targeted user, authorize immediately
-      if (target === clientUid || target === clientEmail) {
+      if (target === clientUid || target === clientEmail || (clientManagerId && target === clientManagerId)) {
         return true;
       }
       // If not the targeted user and this is a purely private direct message (no territorial scope), block

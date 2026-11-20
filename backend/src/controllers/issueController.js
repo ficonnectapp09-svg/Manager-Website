@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { getManagerTerritoryProfile, isTaskInManagerTerritory } = require('./taskController');
+const { publishEntityEvent, cacheManager } = require('../realtime');
 
 // Helper to normalize issue/ticket status
 const normalizeStatus = (status) => {
@@ -181,6 +182,25 @@ const updateIssueStatus = async (req, res) => {
     };
 
     const updated = await db.tickets.findByIdAndUpdate(issueId, updatePayload);
+
+    // Broadcast real-time ecosystem event for cross-platform synchronization
+    publishEntityEvent({
+      entity: 'issue',
+      action: 'status.updated',
+      entityId: updated._id || issueId,
+      data: updated,
+      scope: {
+        stateId: updated.stateId || updated.state,
+        districtId: updated.districtId || updated.district,
+        divisionId: updated.divisionId || updated.division,
+        pincodeId: updated.pincodeId || updated.pincode,
+        targetUserId: updated.creator || updated.creatorId || null
+      }
+    });
+
+    // Invalidate cached issue and dashboard lists across instances
+    await cacheManager.invalidateEntity('issue', issueId).catch(() => null);
+    await cacheManager.purgeLocalPattern('tickets:*').catch(() => null);
 
     return res.json({
       success: true,
