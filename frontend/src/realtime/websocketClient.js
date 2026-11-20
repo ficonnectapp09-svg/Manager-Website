@@ -33,9 +33,10 @@ class WebSocketClient {
       return `${wsOrigin}/ws?token=${token}`;
     }
 
-    // Default Render production WSS endpoint
+    // Default Render production WSS endpoint (derived from VITE_API_URL env var)
+    const wsApiBase = (import.meta.env.VITE_API_URL || 'https://manager-website.onrender.com/api').replace(/^http/, 'ws').replace(/\/api\/?$/, '');
     if (window.location.protocol === 'https:' || window.location.hostname.endsWith('vercel.app')) {
-      return `wss://connect-manager.onrender.com/ws?token=${token}`;
+      return `${wsApiBase}/ws?token=${token}`;
     }
 
     let host = window.location.host;

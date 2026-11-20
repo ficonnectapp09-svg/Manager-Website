@@ -69,7 +69,8 @@ const STATIC_ALLOWED_ORIGINS = [
   'https://ficapp.in',
   'http://ficapp.in',
   'https://www.ficapp.in',
-  'https://connect-manager.onrender.com'
+  'https://connect-manager.onrender.com',
+  'https://manager-website.onrender.com'
 ];
 
 if (process.env.ALLOWED_ORIGINS) {

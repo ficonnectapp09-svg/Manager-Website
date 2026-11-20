@@ -64,7 +64,7 @@ const resolveMediaUrl = (url) => {
   if (url.startsWith('data:') || url.startsWith('blob:')) return url;
   if (url.startsWith('http://') || url.startsWith('https://')) return url;
   const cleanUrl = url.startsWith('/') ? url : `/${url}`;
-  const backendBase = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || 'https://connect-manager.onrender.com';
+  const backendBase = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || 'https://manager-website.onrender.com/api';
   const cleanBase = backendBase.replace(/\/api\/?$/, '').replace(/\/+$/, '');
   if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
     return cleanUrl;
